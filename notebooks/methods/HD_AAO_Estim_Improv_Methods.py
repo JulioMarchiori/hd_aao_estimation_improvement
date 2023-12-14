@@ -745,6 +745,81 @@ def tuneGradBoost(ml_dataset, cag_min, cag_max, columns, target, runOneHot):
     return grid_search
 
 
+def tuneXGradBoost(ml_dataset, cag_min, cag_max, columns, target, runOneHot):
+    """ Function used to tune the XGBoosting Model 
+    
+    Parameters
+    ----------
+    ml_dataset: The HD dataframe
+    cag_min: Minimum value of 'caghigh' to be filtered
+    cag_max: Maximum value of 'caghigh' to be filtered
+    columns: The input columns used into analysis
+    target: The feature target used into analysis
+    runOneHot: Flag to execute the OneHot Encoding (0 - No; 1 - Yes)
+
+    Returns
+    -------
+    The model tuning evaluation results
+    """
+
+    # Reset seed for each run
+    seed_value = random.randrange(2 ** 32 - 1)
+    np.random.seed(seed_value)
+    random.seed(seed_value)
+    os.environ['PYTHONHASHSEED'] = str(seed_value)
+    tf.random.set_seed(seed_value)
+    rseed(seed_value)
+        
+    # Create the parameter grid based on the results of random search 
+    param_grid = {
+        'max_depth': [3],
+        'max_features': [15, 1.0],
+        'min_samples_leaf': [1, 2, 3],
+        'min_samples_split': [15],
+        'n_estimators': [800],
+        'learning_rate': [0.01, 0.03]
+    }
+    # Create a based model
+    rf = XGBRegressor()
+    # Instantiate the grid search model
+    grid_search = GridSearchCV(estimator = rf, param_grid = param_grid, cv = 5, n_jobs = -1, verbose = 0)
+        
+    # Select data
+    label = target
+    cols=columns
+    if runOneHot == 1:
+        # Features Selected to be used
+        num_columns_pp = cols[0]
+        cat_columns_pp = cols[1]
+        cols = num_columns_pp + cat_columns_pp
+        drop_cat = True
+    subset = ml_dataset.groupby('subjid').first().loc[:, [label] + cols]
+    subset = subset.loc[((subset['caghigh'] >= cag_min) & (subset['caghigh'] <= cag_max))]
+    subset.dropna(inplace=True)
+    n = subset.shape[0]
+    
+    if runOneHot == 1:
+        # Call One Hot Enconding Function
+        subset, cat_cols = OneHotEncodingFunc(subset, [label], num_columns_pp, cat_columns_pp, drop_cat)
+        cols = num_columns_pp + cat_cols
+
+    # Get input and labels
+    input_data = subset[cols].values
+    targets = subset[label].values
+    
+    # Create Data    
+    X_train, X_valid, y_train, y_valid = train_test_split(input_data, targets, test_size=0.20, random_state=seed_value)
+    
+    # Scale Data
+    scaleObj, _, X_train, X_valid, y_train, y_valid, y_orig = ScaleData(X_train, X_valid, y_train, y_valid, need_reshape=True)
+    
+    # Train Data
+    print("Training XGBoosting using GridSearchCV")
+    grid_search.fit(X_train, y_train.ravel())   
+    
+    return grid_search
+
+
 def FindBestParams_NN(ml_dataset, ml_iter, columns, target, cag_min, cag_max, packages):
     """ Function used to tune the Neural Network Model 
     
@@ -786,9 +861,9 @@ def FindBestParams_NN(ml_dataset, ml_iter, columns, target, cag_min, cag_max, pa
     SearchResultsData = pd.DataFrame(columns=['TrialNumber', 'Parameters', 'MAE'])
     
     # Parameters definition
-    units_list = [64, 128]
+    units_list = [64, 128, 256]
     activation_list = ['relu'] #sigmoid
-    hidden_layers = [2, 3]
+    hidden_layers = [2, 3, 4]
     learning_rate = [0.01, 0.005]
     epsilons = [0.001, 0.0001]    
     momentum = 0.8 
@@ -1332,6 +1407,8 @@ def tryTwoModels(ml_dataset, ml_iter, columns, target, cag_min, cag_max, NNparam
     valid_results_cb = []
     valid_results_nn = []
     seed_values_list = []
+    val_nn = []
+    val_cb = []
     
     # Prepare the data
     lb_done = 0
@@ -1399,7 +1476,7 @@ def tryTwoModels(ml_dataset, ml_iter, columns, target, cag_min, cag_max, NNparam
         scaleObj, _, X_train, X_test, y_train, y_test, y_orig = ScaleData(X_train, X_test, y_train, y_test, need_reshape=True)
 
         # Create a based models                   
-        model_cb = CatBoostRegressor(depth=3, iterations=800, learning_rate=0.01, l2_leaf_reg=1, silent=True, random_state=seed_value)     
+        model_cb = CatBoostRegressor(depth=3, iterations=1000, learning_rate=0.01, l2_leaf_reg=1, silent=True, random_state=seed_value)     
         model_nn = feedforwardNNFunc(X_train.shape[1], NNparams[2])
 
         # Train the models
@@ -1466,9 +1543,9 @@ def feedforwardNNFunc(dim, hl):
 
     # Prepare Neural Network Parameters
     if hl == 2:       
-        units_1 = 64
-        units_2 = 128
-        units_3 = 64
+        units_1 = 128
+        units_2 = 256
+        units_3 = 128
     elif hl == 3:
         units_1 = 64
         units_2 = 128
@@ -1479,7 +1556,7 @@ def feedforwardNNFunc(dim, hl):
     act = 'relu'
     initializer = 'normal'
     optimizer = 'adam'
-    lr = 0.01   #0.005
+    lr = 0.005   #0.005
     eps = 0.001 #0.0001
     
     ada = Adam(learning_rate=lr, epsilon=eps)
