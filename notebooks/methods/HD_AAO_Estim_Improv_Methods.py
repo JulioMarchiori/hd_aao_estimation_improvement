@@ -1038,6 +1038,90 @@ def train_models(ml_dataset, cag_min, cag_max, columns, target, NNparams, runOne
     return summary
 
 
+
+def train_models_all(ml_dataset, cag_min, cag_max, columns, target, NNparams, runOneHot):
+    """ Function used to train different models:
+    (Langbehn, RandomForest, CatBoosting, GradientBooting, AdaBoosting, MLP, Linear SVM, NeuralNetwork and others)
+    
+    Parameters
+    ----------
+    ml_dataset: The HD dataframe
+    cag_min: Minimum value of 'caghigh' to be filtered
+    cag_max: Maximum value of 'caghigh' to be filtered
+    columns: The input columns used into analysis
+    target: The feature target used into analysis
+    NNparams: Combo of batch size and epochs trial to be used
+    runOneHot: Flag to execute the OneHot Encoding (0 - No; 1 - Yes)
+
+    Returns
+    -------
+    The average summary with the results
+    """
+
+    print((ml_dataset[(ml_dataset['caghigh'] >=cag_min) & (ml_dataset['caghigh'] <= cag_max)].copy()).shape)
+    langbehn_refitted, _ = refit_langbehn2(ml_dataset[(ml_dataset['caghigh'] >=cag_min) & (ml_dataset['caghigh'] <= cag_max)].copy(), target=target)
+    langbehn_models = [langbehn, langbehn_refitted]
+    langbehn_names = ['Langbehn original', 'Langbehn refitted']
+    
+    models = langbehn_models + [feedforwardNNFunc, 
+                            RandomForestRegressor(random_state=42),
+                            CatBoostRegressor(verbose=0, random_seed=42),
+                            XGBRegressor(random_state=42),
+                            MLPRegressor(max_iter=1000, random_state=42),
+                            LinearSVR(random_state=42, max_iter=50000),
+                            KNeighborsRegressor(5, weights='distance'),
+                            BaggingRegressor(base_estimator=SVR(), n_estimators=10, random_state=42),
+                            ExtraTreesRegressor(n_estimators=100, random_state=42),
+                            GradientBoostingRegressor(random_state=42),
+                            AdaBoostRegressor(random_state=42, n_estimators=100),
+                            LinearRegression(),
+                           ]
+    
+    names = langbehn_names + ['FeedForwardNN',
+                              'Random Forest',
+                              'CatBoost',
+                              'XGBoost',
+                              'MLP',
+                              'Linear SVM',
+                              'KNN',
+                              'Bagging',
+                              'ExtraTree',
+                              'GradientBoosting',
+                              'AdaBoosting',
+                              'Linear Regression',
+                             ]
+
+    all_results = []
+    
+    # Evaluation    
+    for name, mod in zip(names, models):
+        print('-' * 40)
+        print(name)
+        if 'Langbehn' in name:
+            results = train(ml_dataset, mod, cag_range=(cag_min, cag_max), fit=0, cols=['caghigh'], target=target,
+                             NNparams=NNparams, runOneHot=0)
+        elif name == 'FeedForwardNN':
+            results = train(ml_dataset, mod, cag_range=(cag_min, cag_max), fit=1, cols=columns, target=target,
+                             NNparams=NNparams, runOneHot=1)
+        elif name == 'Linear Regression' and runOneHot==1:
+            columns_lr = columns[0]+columns[1]
+            results = train(ml_dataset, mod, cag_range=(cag_min, cag_max), fit=2, cols=columns_lr, target=target,
+                             NNparams=NNparams, runOneHot=0)                
+        else:
+            results = train(ml_dataset, mod, cag_range=(cag_min, cag_max), fit=2, cols=columns, target=target,
+                             NNparams=NNparams, runOneHot=runOneHot)
+        results.index = [name]
+        all_results.append(list(results.reset_index().values.reshape(-1)))
+        print()
+    
+    # Save
+    summary = pd.DataFrame(all_results, columns=['Model', 'MAE', 'RMSE', 'R2'])\
+                .set_index('Model')\
+                .sort_values('MAE', ascending=True)
+    summary.to_csv(os.path.join('tables', 'summary_AAO_{}-{}_all_models.csv'.format(cag_min, cag_max)), float_format='%.3f')
+    return summary
+
+
 def train(train_dataset, model, cag_range, fit, cols, target, NNparams, runOneHot):
     """ Function used to train different models, invoked by 'train_models' Method:
     (Langbehn, RandomForest, CatBoosting, GradientBooting, AdaBoosting and NeuralNetwork)
@@ -1114,7 +1198,7 @@ def train(train_dataset, model, cag_range, fit, cols, target, NNparams, runOneHo
                 model.fit(X_train, y_train)
                 y_valid = y_orig
             elif fit == 1:
-                model = feedforwardNNFunc(X_train.shape[1])
+                model = feedforwardNNFunc(X_train.shape[1], NNparams[2])
                 scaleObj, _, X_train, X_valid, y_train, y_valid, y_orig = ScaleData(X_train, X_valid, y_train, y_valid, need_reshape=True)
                 model.fit(X_train, y_train, batch_size = NNparams[0], epochs = NNparams[1], verbose = 0)
                 y_valid = y_orig
