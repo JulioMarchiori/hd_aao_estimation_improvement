@@ -10,3 +10,5 @@ After training, predictions can be made based on new data.
 The main objective of this research is to improve the estimation of AAO for HD, which currently relies solely on CAG repeat length. 
 Enroll-HD provides high-quality longitudinal data on HD patients, making it a valuable resource for ML algorithms.
 
+The notebooks are shared here. The numbering on the names helps to identify the jobs they have carried out, although they can work independently. 
+The PDS-5 dataset used from Enroll-HD can be requested at https://enroll-hd.org/for-researchers/access-data/
